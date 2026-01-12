@@ -1,0 +1,10 @@
+{
+  "org": "PerformYard",
+  "batchSize": 3,
+  "ciRetryCount": 1,
+  "waitBetweenBatchesMs": 5000,
+  "ciPollIntervalMs": 30000,
+  "ciTimeoutMs": 1800000,
+  "excludeRepos": [],
+  "includeRepos": null
+}

@@ -1,0 +1,32 @@
+{
+  "name": "pr-sync",
+  "version": "1.0.0",
+  "description": "Keep GitHub PRs updated with their target branch and CI passing",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "pr-sync": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "github",
+    "pr",
+    "ci",
+    "automation"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0"
+  },
+  "dependencies": {
+    "p-limit": "^7.2.0"
+  }
+}
