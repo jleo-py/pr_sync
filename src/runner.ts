@@ -8,6 +8,7 @@ import {
   getAuthenticatedUser,
   listOpenPRs,
   updateBranchWithBase,
+  refreshPRStatus,
 } from "./github.js";
 import { getCIStatus, waitForCI, retryAndWaitForCI } from "./ci.js";
 import * as output from "./output.js";
@@ -74,29 +75,11 @@ export async function syncAllPRs(config: Config): Promise<RunSummary> {
   output.printFoundPRs(prs);
   output.printDependencyOrder(sortResult.hasStackedPRs);
 
-  // Group PRs by depth for proper dependency ordering
-  const prsByDepth = groupPRsByDepth(sortResult.prsWithDepth);
-  const depths = Array.from(prsByDepth.keys()).sort((a, b) => a - b);
-
-  // Process each depth level with concurrency within the level
-  const summaries: PRSummary[] = [];
-
-  for (let i = 0; i < depths.length; i++) {
-    const depth = depths[i];
-    const prsAtDepth = prsByDepth.get(depth)!;
-
-    output.printDepthLevelStart(depth, prsAtDepth.length);
-
-    const depthSummaries = await processPRsConcurrently(prsAtDepth, config);
-    summaries.push(...depthSummaries);
-
-    // Wait between depth levels (except for the last one)
-    if (i < depths.length - 1 && config.waitBetweenBatchesMs > 0) {
-      await sleep(config.waitBetweenBatchesMs);
-    }
-
-    console.log(); // Blank line between depth levels
-  }
+  // Process PRs with dependency-aware concurrent queue
+  const summaries = await processPRsWithDependencyQueue(
+    sortResult.prsWithDepth,
+    config
+  );
 
   // Build and print summary
   const summary = buildSummary(summaries);
@@ -113,9 +96,26 @@ async function processPR(
   config: Config,
   waitForUpdateSlot?: () => Promise<void>
 ): Promise<PRSummary> {
+  return processPRWithEarlyResolve(pr, config, waitForUpdateSlot);
+}
+
+/**
+ * Process a single PR with an optional callback after branch update.
+ * The callback is called after the branch is updated (or confirmed up-to-date)
+ * but BEFORE waiting for CI. This allows stacked PRs to start updating
+ * while the base PR's CI is still running.
+ */
+async function processPRWithEarlyResolve(
+  pr: PR,
+  config: Config,
+  waitForUpdateSlot?: () => Promise<void>,
+  onBranchUpdated?: () => void
+): Promise<PRSummary> {
   // Check if PR has conflicts
   if (pr.mergeable === "CONFLICTING") {
     output.printPRStatus(pr, "merge conflict", "\u{1F534}");
+    // Still resolve - stacked PRs can try (they'll likely also conflict)
+    if (onBranchUpdated) onBranchUpdated();
     return {
       pr,
       status: { type: "conflict" },
@@ -127,27 +127,37 @@ async function processPR(
   const needsUpdate = pr.behindBy > 0 || pr.behindBy === -1; // -1 means we couldn't check, so try anyway
 
   if (!needsUpdate) {
-    // Already up to date - just check CI
-    const ciStatus = await getCIStatus(pr);
+    // Already up to date - resolve immediately so stacked PRs can proceed
     output.printPRStatus(pr, "already up to date", "\u2705");
-    output.printCIStatus(ciStatus);
+    if (onBranchUpdated) onBranchUpdated();
+
+    // Check CI status
+    let ciStatus = await getCIStatus(pr);
+
+    // If CI is pending, wait for it to complete
+    if (ciStatus.type === "pending") {
+      output.printWaitingForCI(pr);
+      ciStatus = await waitForCI(pr, config);
+    }
+
+    output.printCIStatus(ciStatus, pr);
 
     // If CI is failing, retry
     if (ciStatus.type === "failing" && config.ciRetryCount > 0) {
       output.printRetrying(pr, ciStatus.runs.length);
-      const retriedStatus = await retryAndWaitForCI(pr, ciStatus.runs, config);
-      output.printCIStatus(retriedStatus);
+      ciStatus = await retryAndWaitForCI(pr, ciStatus.runs, config);
+      output.printCIStatus(ciStatus, pr);
 
       return {
         pr,
-        status: { type: "up_to_date" },
+        status: { type: "up_to_date", ciStatus },
         retriedCI: true,
       };
     }
 
     return {
       pr,
-      status: { type: "up_to_date" },
+      status: { type: "up_to_date", ciStatus },
       retriedCI: false,
     };
   }
@@ -163,6 +173,8 @@ async function processPR(
   if (!updateResult.success) {
     if (updateResult.conflict) {
       output.printPRStatus(pr, "merge conflict during update", "\u{1F534}");
+      // Still resolve - stacked PRs can try
+      if (onBranchUpdated) onBranchUpdated();
       return {
         pr,
         status: { type: "conflict" },
@@ -171,6 +183,8 @@ async function processPR(
     }
 
     output.printPRStatus(pr, `update failed: ${updateResult.error}`, "\u274C");
+    // Still resolve - stacked PRs can try
+    if (onBranchUpdated) onBranchUpdated();
     return {
       pr,
       status: {
@@ -182,11 +196,15 @@ async function processPR(
   }
 
   output.printPRStatus(pr, "updated", "\u{1F680}");
-  output.printWaitingForCI();
 
-  // Wait for CI to complete
+  // Branch is updated - resolve so stacked PRs can start updating
+  if (onBranchUpdated) onBranchUpdated();
+
+  output.printWaitingForCI(pr);
+
+  // Wait for CI to complete (stacked PRs don't wait for this)
   let ciStatus = await waitForCI(pr, config);
-  output.printCIStatus(ciStatus);
+  output.printCIStatus(ciStatus, pr);
 
   let retriedCI = false;
 
@@ -195,7 +213,7 @@ async function processPR(
     output.printRetrying(pr, ciStatus.runs.length);
     retriedCI = true;
     ciStatus = await retryAndWaitForCI(pr, ciStatus.runs, config);
-    output.printCIStatus(ciStatus);
+    output.printCIStatus(ciStatus, pr);
   }
 
   return {
@@ -322,25 +340,104 @@ function groupPRsByDepth(prsWithDepth: PRWithDepth[]): Map<number, PR[]> {
 }
 
 /**
- * Process PRs concurrently with staggered updates
+ * Process PRs using a dependency-aware concurrent queue.
+ *
+ * Instead of processing by depth level, this starts processing PRs as soon as
+ * their dependencies are complete, respecting maxConcurrency at all times.
+ *
+ * For stacked PRs (depth > 0), the PR status is refreshed from GitHub before
+ * processing to detect if the base branch was updated.
  */
-async function processPRsConcurrently(
-  prs: PR[],
+async function processPRsWithDependencyQueue(
+  prsWithDepth: PRWithDepth[],
   config: Config
 ): Promise<PRSummary[]> {
   const limit = pLimit(config.maxConcurrency);
-
-  // Rate limiter ensures updates are spaced apart (only affects PRs that need updating)
   const waitForUpdateSlot = createUpdateRateLimiter(config.staggerDelayMs);
 
-  const tasks = prs.map((pr) => {
-    return limit(async () => {
-      output.printPRStart(pr);
-      return processPR(pr, config, waitForUpdateSlot);
-    });
-  });
+  // Use composite keys (repo:number) to avoid collisions across repos
+  const prKey = (pr: PR) => `${pr.repo}:#${pr.number}`;
 
-  return Promise.all(tasks);
+  // Build a map of headRef -> PR for dependency lookup
+  const headRefToPR = new Map<string, PR>();
+  for (const { pr } of prsWithDepth) {
+    headRefToPR.set(`${pr.repo}:${pr.headRef}`, pr);
+  }
+
+  // Track which base PR each PR depends on (if any)
+  // Key: prKey, Value: prKey of the dependency
+  const dependsOn = new Map<string, string>();
+
+  // For each PR, find what it depends on
+  for (const { pr } of prsWithDepth) {
+    const basePRKey = `${pr.repo}:${pr.baseRef}`;
+    const basePR = headRefToPR.get(basePRKey);
+    if (basePR) {
+      dependsOn.set(prKey(pr), prKey(basePR));
+    }
+  }
+
+  // Track summaries and completion promises by prKey
+  const summaries = new Map<string, PRSummary>();
+  const prPromises = new Map<string, Promise<void>>();
+  const prResolvers = new Map<string, () => void>();
+
+  // Create a completion promise for each PR
+  for (const { pr } of prsWithDepth) {
+    let resolver!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      resolver = resolve;
+    });
+    prPromises.set(prKey(pr), promise);
+    prResolvers.set(prKey(pr), resolver);
+  }
+
+  // Process a single PR (uses p-limit slot only during actual processing)
+  async function processOnePR(item: PRWithDepth): Promise<void> {
+    let { pr } = item;
+    const { depth } = item;
+    const key = prKey(pr);
+
+    // Wait for dependency's BRANCH UPDATE (not CI) before starting
+    const depKey = dependsOn.get(key);
+    if (depKey) {
+      const depPromise = prPromises.get(depKey);
+      if (depPromise) {
+        await depPromise;
+      }
+    }
+
+    // Acquire a p-limit slot for processing
+    await limit(async () => {
+      // For stacked PRs, refresh status since base may have been updated
+      if (depth > 0) {
+        output.printRefreshingStatus(pr);
+        pr = await refreshPRStatus(pr);
+      }
+
+      output.printPRStart(pr);
+
+      // Process the PR but resolve dependency promise after branch update (not after CI)
+      const summary = await processPRWithEarlyResolve(
+        pr,
+        config,
+        waitForUpdateSlot,
+        () => {
+          // Resolve promise after branch update so stacked PRs can proceed
+          const resolver = prResolvers.get(key);
+          if (resolver) resolver();
+        }
+      );
+      summaries.set(key, summary);
+    });
+  }
+
+  // Start all PRs concurrently - they'll wait for dependencies as needed
+  const tasks = prsWithDepth.map((item) => processOnePR(item));
+  await Promise.all(tasks);
+
+  // Return summaries in original order
+  return prsWithDepth.map(({ pr }) => summaries.get(prKey(pr))!);
 }
 
 /**
@@ -360,6 +457,10 @@ function buildSummary(summaries: PRSummary[]): RunSummary {
     switch (s.status.type) {
       case "up_to_date":
         summary.upToDate.push(s);
+        // Check if CI is failing for up-to-date PRs too
+        if (s.status.ciStatus && isCIFailing(s.status.ciStatus)) {
+          summary.ciFailing.push(s);
+        }
         break;
       case "updated":
         summary.updated.push(s);

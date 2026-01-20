@@ -17,7 +17,6 @@ const testConfig: Config = {
   maxConcurrency: 3,
   staggerDelayMs: 0, // No delay in tests
   ciRetryCount: 1,
-  waitBetweenBatchesMs: 0, // No delay in tests
   ciPollIntervalMs: 10, // Fast polling in tests
   ciTimeoutMs: 1000, // Short timeout in tests
   excludeRepos: [],

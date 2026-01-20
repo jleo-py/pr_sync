@@ -86,6 +86,13 @@ export function printPRStart(pr: PR): void {
   );
 }
 
+export function printRefreshingStatus(pr: PR): void {
+  const repoShort = pr.repo.split("/")[1] || pr.repo;
+  console.log(
+    `  ${colors.dim}├─${colors.reset} ${icons.retry} ${repoShort}#${pr.number}: refreshing status...`
+  );
+}
+
 export function printPRStatus(pr: PR, status: string, icon: string): void {
   const repoShort = pr.repo.split("/")[1] || pr.repo;
   console.log(
@@ -93,33 +100,37 @@ export function printPRStatus(pr: PR, status: string, icon: string): void {
   );
 }
 
-export function printCIStatus(status: CIStatus): void {
+export function printCIStatus(status: CIStatus, pr?: PR): void {
+  const prefix = pr
+    ? `    ${colors.dim}${pr.repo.split("/")[1]}#${pr.number}:${colors.reset} `
+    : "    ";
+
   switch (status.type) {
     case "passing":
-      console.log(`    ${icons.check} CI passing`);
+      console.log(`${prefix}${icons.check} CI passing`);
       break;
     case "failing":
       console.log(
-        `    ${icons.warning} CI failing (${status.runs.length} failed run${
+        `${prefix}${icons.warning} CI failing (${status.runs.length} failed run${
           status.runs.length === 1 ? "" : "s"
         })`
       );
       break;
     case "pending":
-      console.log(`    ${icons.pending} CI in progress...`);
+      console.log(`${prefix}${icons.pending} CI in progress...`);
       break;
     case "retried":
       if (status.outcome === "passing") {
-        console.log(`    ${icons.check} CI passing after retry`);
+        console.log(`${prefix}${icons.check} CI passing after retry`);
       } else {
-        console.log(`    ${icons.warning} CI still failing after retry`);
+        console.log(`${prefix}${icons.warning} CI still failing after retry`);
       }
       break;
     case "timeout":
-      console.log(`    ${icons.warning} CI timed out waiting`);
+      console.log(`${prefix}${icons.warning} CI timed out waiting`);
       break;
     case "none":
-      console.log(`    ${colors.dim}(no CI configured)${colors.reset}`);
+      console.log(`${prefix}${colors.dim}(no CI configured)${colors.reset}`);
       break;
   }
 }
@@ -127,14 +138,17 @@ export function printCIStatus(status: CIStatus): void {
 export function printRetrying(pr: PR, runCount: number): void {
   const repoShort = pr.repo.split("/")[1] || pr.repo;
   console.log(
-    `    ${icons.retry} Re-running ${runCount} failed job${
+    `    ${colors.dim}${repoShort}#${pr.number}:${colors.reset} ${icons.retry} Re-running ${runCount} failed job${
       runCount === 1 ? "" : "s"
     }...`
   );
 }
 
-export function printWaitingForCI(): void {
-  console.log(`    ${icons.pending} Waiting for CI...`);
+export function printWaitingForCI(pr?: PR): void {
+  const prefix = pr
+    ? `    ${colors.dim}${pr.repo.split("/")[1]}#${pr.number}:${colors.reset} `
+    : "    ";
+  console.log(`${prefix}${icons.pending} Waiting for CI...`);
 }
 
 export function printSummary(summary: RunSummary): void {
@@ -143,17 +157,20 @@ export function printSummary(summary: RunSummary): void {
   console.log(`${colors.bold}SUMMARY${colors.reset}`);
   console.log();
 
-  // Up to date / passing
+  // Up to date / passing - only include PRs with passing CI
   const passing = [...summary.upToDate, ...summary.updated].filter((s) => {
-    if (s.status.type === "up_to_date") return true;
-    if (s.status.type === "updated") {
-      const ci = s.status.ciStatus;
-      return (
-        ci.type === "passing" ||
-        (ci.type === "retried" && ci.outcome === "passing")
-      );
-    }
-    return false;
+    const ci =
+      s.status.type === "up_to_date"
+        ? s.status.ciStatus
+        : s.status.type === "updated"
+          ? s.status.ciStatus
+          : undefined;
+
+    // No CI configured or CI is passing
+    if (!ci || ci.type === "none") return true;
+    return (
+      ci.type === "passing" || (ci.type === "retried" && ci.outcome === "passing")
+    );
   });
 
   if (passing.length > 0) {

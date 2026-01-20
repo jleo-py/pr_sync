@@ -76,7 +76,6 @@ CONFIGURATION:
     "maxConcurrency": 3,           // Max PRs to process concurrently
     "staggerDelayMs": 30000,       // 30s delay between starting concurrent PRs
     "ciRetryCount": 1,             // Times to retry failed CI
-    "waitBetweenBatchesMs": 5000,  // Wait between dependency depth levels
     "ciPollIntervalMs": 30000,     // CI polling interval
     "ciTimeoutMs": 1800000,        // 30 min CI timeout
     "excludeRepos": [],            // Repos to skip
@@ -89,9 +88,9 @@ PREREQUISITES:
 
 WHAT IT DOES:
   1. Finds all your open PRs in the organization
-  2. Groups PRs by dependency depth (stacked PRs are processed after their base)
+  2. Detects stacked PRs and their dependencies
   3. Updates branches that are behind their target (merge, not rebase)
-  4. Processes PRs concurrently within each depth level (with staggered starts)
+  4. Processes PRs concurrently (stacked PRs wait for their base to complete)
   5. Waits for CI to complete, retries failed CI once
   6. Reports conflicts and persistent failures for manual attention
 

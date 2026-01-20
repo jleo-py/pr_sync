@@ -9,6 +9,11 @@ import {
   rerunFailedJobs,
 } from "./github.js";
 
+// Workflow names to ignore (manual approval checks that stay pending indefinitely)
+const IGNORED_WORKFLOWS = [
+  "Review Enforcer", // Contains Engineering Code Review and QA Code Review jobs
+];
+
 /**
  * Get the current CI status for a PR
  */
@@ -22,8 +27,10 @@ export async function getCIStatus(pr: PR): Promise<CIStatus> {
   // Get the latest commit SHA to filter runs
   const latestSha = await getLatestCommitSha(pr.repo, pr.number);
 
-  // Only consider runs for the latest commit
-  const latestRuns = runs.filter((r) => r.headSha === latestSha);
+  // Only consider runs for the latest commit, excluding ignored workflows
+  const latestRuns = runs.filter(
+    (r) => r.headSha === latestSha && !IGNORED_WORKFLOWS.includes(r.name)
+  );
 
   if (latestRuns.length === 0) {
     // No runs for the latest commit yet - CI might still be starting

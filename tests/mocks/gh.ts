@@ -142,6 +142,10 @@ export const mockScenarios = {
           },
         })
       )
+      // IMPORTANT: --jq pattern must come BEFORE --json pattern because
+      // getLatestCommitSha uses both: "gh pr view ... --json commits --jq ..."
+      // and we want to match that specifically, not the getPRDetails call
+      .mock(/gh pr view.*--jq/, run.headSha)
       .mock(
         /gh pr view.*--json/,
         JSON.stringify({
@@ -157,8 +161,7 @@ export const mockScenarios = {
       )
       // --jq '.ahead_by' extracts just the number
       .mock(/gh api repos\/.*\/compare/, "0")
-      .mock("gh run list", JSON.stringify([run]))
-      .mock(/gh pr view.*--jq/, run.headSha);
+      .mock("gh run list", JSON.stringify([run]));
   },
 
   /**
@@ -180,6 +183,10 @@ export const mockScenarios = {
           },
         })
       )
+      // IMPORTANT: --jq pattern must come BEFORE --json pattern because
+      // getLatestCommitSha uses both: "gh pr view ... --json commits --jq ..."
+      // and we want to match that specifically, not the getPRDetails call
+      .mock(/gh pr view.*--jq/, run.headSha)
       .mock(
         /gh pr view.*--json/,
         JSON.stringify({
@@ -196,8 +203,7 @@ export const mockScenarios = {
       // --jq '.ahead_by' extracts just the number - PR is 5 commits behind
       .mock(/gh api repos\/.*\/compare/, "5")
       .mock(/gh api repos\/.*\/pulls\/.*\/update-branch/, "{}")
-      .mock("gh run list", JSON.stringify([run]))
-      .mock(/gh pr view.*--jq/, run.headSha);
+      .mock("gh run list", JSON.stringify([run]));
   },
 
   /**

@@ -4,7 +4,6 @@ export interface Config {
   maxConcurrency: number;
   staggerDelayMs: number;
   ciRetryCount: number;
-  waitBetweenBatchesMs: number;
   ciPollIntervalMs: number;
   ciTimeoutMs: number;
   excludeRepos: string[];
@@ -31,7 +30,7 @@ export interface PR {
 
 // PR processing status
 export type PRStatus =
-  | { type: "up_to_date" }
+  | { type: "up_to_date"; ciStatus?: CIStatus }
   | { type: "updated"; ciStatus: CIStatus }
   | { type: "conflict" }
   | { type: "update_failed"; error: string }

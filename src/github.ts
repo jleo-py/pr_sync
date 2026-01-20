@@ -237,6 +237,31 @@ export async function getLatestCommitSha(
   return stdout.trim();
 }
 
+/**
+ * Refresh PR status - re-fetch behindBy and mergeable state
+ * Used after updating a base PR to check if stacked PRs now need updating
+ */
+export async function refreshPRStatus(pr: PR): Promise<PR> {
+  const { stdout } = await executeWithRetry(
+    `gh pr view ${pr.number} --repo ${pr.repo} --json baseRefName,mergeable`
+  );
+
+  const data = JSON.parse(stdout) as {
+    baseRefName: string;
+    mergeable: string;
+  };
+
+  // Check how far behind the PR is now
+  const behindBy = await getBehindCount(pr.repo, data.baseRefName, pr.headRef);
+
+  return {
+    ...pr,
+    baseRef: data.baseRefName,
+    mergeable: data.mergeable as PR["mergeable"],
+    behindBy,
+  };
+}
+
 // ============================================
 // WRITE OPERATIONS (ONLY TWO ALLOWED)
 // ============================================

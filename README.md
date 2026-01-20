@@ -53,9 +53,9 @@ Edit `config.json`:
 ```json
 {
   "org": "YourOrg",
-  "batchSize": 3,
+  "maxConcurrency": 3,
+  "staggerDelayMs": 30000,
   "ciRetryCount": 1,
-  "waitBetweenBatchesMs": 5000,
   "ciPollIntervalMs": 30000,
   "ciTimeoutMs": 1800000,
   "excludeRepos": [],
@@ -66,9 +66,9 @@ Edit `config.json`:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `org` | `"PerformYard"` | GitHub organization to search |
-| `batchSize` | `3` | Number of PRs to process in parallel |
+| `maxConcurrency` | `3` | Number of PRs to process in parallel |
+| `staggerDelayMs` | `30000` | Delay between starting concurrent PRs (ms) |
 | `ciRetryCount` | `1` | Times to retry failed CI (0 = no retries) |
-| `waitBetweenBatchesMs` | `5000` | Delay between batches (ms) |
 | `ciPollIntervalMs` | `30000` | How often to check CI status (ms) |
 | `ciTimeoutMs` | `1800000` | Max time to wait for CI (30 min) |
 | `excludeRepos` | `[]` | Repos to skip (e.g., `["legacy-app"]`) |
@@ -81,7 +81,7 @@ Edit `config.json`:
 pnpm start
 
 # Or with CLI options
-pnpm start --org MyOrg --batch-size 2
+pnpm start --org MyOrg --max-concurrency 2
 
 # See all options
 pnpm start --help
@@ -97,19 +97,23 @@ PR Sync - Keep your PRs up to date
 
 🔍 Found 4 open PRs
 
-📦 Batch 1/2
-  ✅ PerformYard#1234 - already up to date
-    ✅ CI passing
-  🚀 PerformYard#1235 - updated
-    ⏳ Waiting for CI...
-    ✅ CI passing
+  (sorted by dependency chain - base branches first)
 
-📦 Batch 2/2
+  ├─ PerformYard#1234: Add user authentication...
+  ✅ PerformYard#1234 - already up to date
+    PerformYard#1234: ✅ CI passing
+  ├─ PerformYard#1235: Fix pagination bug...
+  🚀 PerformYard#1235 - updated
+    PerformYard#1235: ⏳ Waiting for CI...
+    PerformYard#1235: ✅ CI passing
+  ├─ Logan#456: Update analytics...
   🔴 Logan#456 - merge conflict
+  ├─ 🔄 PerformYard#1237: refreshing status...
+  ├─ PerformYard#1237: Improve search filters...
   🚀 PerformYard#1237 - updated
-    ⚠️ CI failing (2 failed runs)
-    🔄 Re-running 2 failed jobs...
-    ✅ CI passing after retry
+    PerformYard#1237: ⚠️ CI failing (2 failed runs)
+    PerformYard#1237: 🔄 Re-running 2 failed jobs...
+    PerformYard#1237: ✅ CI passing after retry
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SUMMARY
@@ -179,5 +183,5 @@ tests/
 - Re-authenticate if needed: `gh auth login`
 
 **Rate limits**
-- Reduce `batchSize` in config
-- Increase `waitBetweenBatchesMs`
+- Reduce `maxConcurrency` in config
+- Increase `staggerDelayMs` to space out API calls

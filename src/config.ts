@@ -14,7 +14,6 @@ const DEFAULT_CONFIG: Config = {
   maxConcurrency: 3,
   staggerDelayMs: 30000, // 30 seconds between starting concurrent PRs
   ciRetryCount: 1,
-  waitBetweenBatchesMs: 5000,
   ciPollIntervalMs: 30000,
   ciTimeoutMs: 1800000, // 30 minutes
   excludeRepos: [],
@@ -68,15 +67,6 @@ function validateConfig(config: Config): Config {
 
   if (typeof config.ciRetryCount !== "number" || config.ciRetryCount < 0) {
     throw new Error("Config: 'ciRetryCount' must be a non-negative number");
-  }
-
-  if (
-    typeof config.waitBetweenBatchesMs !== "number" ||
-    config.waitBetweenBatchesMs < 0
-  ) {
-    throw new Error(
-      "Config: 'waitBetweenBatchesMs' must be a non-negative number"
-    );
   }
 
   if (
