@@ -14,6 +14,20 @@ import type { PR, User, WorkflowRun, UpdateResult } from "./types.js";
 
 const execAsync = promisify(exec);
 
+// Global rate limiter to prevent bursts of API calls
+// GitHub's secondary rate limiting can trigger 401 errors when too many requests hit at once
+const MIN_REQUEST_INTERVAL_MS = 100; // Minimum 100ms between API calls
+let rateLimitQueue: Promise<void> = Promise.resolve();
+
+function waitForRateLimit(): Promise<void> {
+  // Chain onto the queue to ensure requests are serialized with proper spacing
+  rateLimitQueue = rateLimitQueue.then(
+    () =>
+      new Promise((resolve) => setTimeout(resolve, MIN_REQUEST_INTERVAL_MS))
+  );
+  return rateLimitQueue;
+}
+
 // For testing: allow injecting a mock executor
 export type CommandExecutor = (
   command: string
@@ -43,22 +57,25 @@ async function executeWithRetry(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      // Rate limit to prevent bursts that trigger GitHub's secondary rate limiting
+      await waitForRateLimit();
       return await executor(command);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       const message = lastError.message.toLowerCase();
 
       // Check if this is a transient network error worth retrying
+      // Note: Do NOT include "api.github.com" as that matches auth errors (401)
+      // which are not transient and should not be retried
       const isTransient =
         message.includes("connection refused") ||
         message.includes("econnreset") ||
+        message.includes("connection reset by peer") || // Go-style ECONNRESET from gh CLI
         message.includes("etimedout") ||
         message.includes("enotfound") ||
         message.includes("socket hang up") ||
-        message.includes("network") ||
         message.includes("dial tcp") ||
         message.includes("error connecting") ||
-        message.includes("api.github.com") ||
         message.includes("connect:") ||
         message.includes("getaddrinfo");
 

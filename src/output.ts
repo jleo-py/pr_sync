@@ -79,10 +79,7 @@ export function printDepthLevelStart(depth: number, count: number): void {
 export function printPRStart(pr: PR): void {
   const repoShort = pr.repo.split("/")[1] || pr.repo;
   console.log(
-    `  ${colors.dim}├─${colors.reset} ${repoShort}#${pr.number}: ${truncate(
-      pr.title,
-      40
-    )}`
+    `  ${colors.dim}├─${colors.reset} ${repoShort}#${pr.number}: ${pr.title}`
   );
 }
 
@@ -242,9 +239,4 @@ export function printError(message: string): void {
 
 export function printWarning(message: string): void {
   console.warn(`${icons.warning} ${colors.yellow}${message}${colors.reset}`);
-}
-
-function truncate(str: string, maxLength: number): string {
-  if (str.length <= maxLength) return str;
-  return str.slice(0, maxLength - 3) + "...";
 }
