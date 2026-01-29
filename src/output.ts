@@ -2,6 +2,7 @@
  * Terminal output formatting
  */
 
+import { format } from "date-fns";
 import type { PR, RunSummary, CIStatus } from "./types.js";
 
 // ANSI color codes
@@ -30,8 +31,24 @@ const icons = {
   retry: "\u{1F504}", // 🔄
 };
 
+function formatTimestamp(): string {
+  const now = new Date();
+
+  // Format: [2026-01-28 13:16:52 -0700 MST]
+  const dateTime = format(now, "yyyy-MM-dd HH:mm:ss xx");
+
+  // Get timezone abbreviation (e.g., MST, PST)
+  const tzAbbrev =
+    new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
+      .formatToParts(now)
+      .find((part) => part.type === "timeZoneName")?.value || "";
+
+  return `[${dateTime} ${tzAbbrev}]`;
+}
+
 export function printHeader(): void {
   console.log();
+  console.log(`${colors.dim}${formatTimestamp()}${colors.reset}`);
   console.log(
     `${colors.bold}${colors.cyan}PR Sync - Keep your PRs up to date${colors.reset}`
   );
