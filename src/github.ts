@@ -23,14 +23,14 @@ function waitForRateLimit(): Promise<void> {
   // Chain onto the queue to ensure requests are serialized with proper spacing
   rateLimitQueue = rateLimitQueue.then(
     () =>
-      new Promise((resolve) => setTimeout(resolve, MIN_REQUEST_INTERVAL_MS))
+      new Promise((resolve) => setTimeout(resolve, MIN_REQUEST_INTERVAL_MS)),
   );
   return rateLimitQueue;
 }
 
 // For testing: allow injecting a mock executor
 export type CommandExecutor = (
-  command: string
+  command: string,
 ) => Promise<{ stdout: string; stderr: string }>;
 let executor: CommandExecutor = execAsync;
 
@@ -51,7 +51,7 @@ const INITIAL_RETRY_DELAY_MS = 1000;
  */
 async function executeWithRetry(
   command: string,
-  retries = MAX_RETRIES
+  retries = MAX_RETRIES,
 ): Promise<{ stdout: string; stderr: string }> {
   let lastError: Error | null = null;
 
@@ -86,7 +86,7 @@ async function executeWithRetry(
       // Exponential backoff
       const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
       console.warn(
-        `Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})...`
+        `Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${retries})...`,
       );
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
@@ -127,7 +127,7 @@ query {
 }`;
 
   const { stdout } = await executeWithRetry(
-    `gh api graphql -f query='${graphqlQuery.replace(/\n/g, " ")}'`
+    `gh api graphql -f query='${graphqlQuery.replace(/\n/g, " ")}'`,
   );
 
   const response = JSON.parse(stdout) as {
@@ -148,7 +148,7 @@ query {
     results.map(async (r) => {
       const details = await getPRDetails(r.repository.nameWithOwner, r.number);
       return details;
-    })
+    }),
   );
 
   return prs;
@@ -159,10 +159,10 @@ query {
  */
 export async function getPRDetails(
   repo: string,
-  prNumber: number
+  prNumber: number,
 ): Promise<PR> {
   const { stdout } = await executeWithRetry(
-    `gh pr view ${prNumber} --repo ${repo} --json number,title,headRefName,baseRefName,url,isDraft,mergeable,commits`
+    `gh pr view ${prNumber} --repo ${repo} --json number,title,headRefName,baseRefName,url,isDraft,mergeable,commits`,
   );
 
   const data = JSON.parse(stdout) as {
@@ -177,7 +177,11 @@ export async function getPRDetails(
   };
 
   // Check how far behind the PR is
-  const behindBy = await getBehindCount(repo, data.baseRefName, data.headRefName);
+  const behindBy = await getBehindCount(
+    repo,
+    data.baseRefName,
+    data.headRefName,
+  );
 
   return {
     number: data.number,
@@ -198,11 +202,11 @@ export async function getPRDetails(
 async function getBehindCount(
   repo: string,
   baseRef: string,
-  headRef: string
+  headRef: string,
 ): Promise<number> {
   try {
     const { stdout } = await executeWithRetry(
-      `gh api repos/${repo}/compare/${headRef}...${baseRef} --jq '.ahead_by'`
+      `gh api repos/${repo}/compare/${headRef}...${baseRef} --jq '.ahead_by'`,
     );
     return parseInt(stdout.trim(), 10) || 0;
   } catch {
@@ -216,10 +220,10 @@ async function getBehindCount(
  */
 export async function getWorkflowRuns(
   repo: string,
-  ref: string
+  ref: string,
 ): Promise<WorkflowRun[]> {
   const { stdout } = await executeWithRetry(
-    `gh run list --repo ${repo} --branch ${ref} --json databaseId,name,status,conclusion,url,headSha --limit 20`
+    `gh run list --repo ${repo} --branch ${ref} --json databaseId,name,status,conclusion,url,headSha --limit 20`,
   );
 
   const runs = JSON.parse(stdout) as Array<{
@@ -246,10 +250,10 @@ export async function getWorkflowRuns(
  */
 export async function getLatestCommitSha(
   repo: string,
-  prNumber: number
+  branch: string,
 ): Promise<string> {
   const { stdout } = await executeWithRetry(
-    `gh pr view ${prNumber} --repo ${repo} --json commits --jq '.commits[-1].oid'`
+    `gh api repos/${repo}/git/refs/heads/${branch} --jq '.object.sha'`,
   );
   return stdout.trim();
 }
@@ -260,7 +264,7 @@ export async function getLatestCommitSha(
  */
 export async function refreshPRStatus(pr: PR): Promise<PR> {
   const { stdout } = await executeWithRetry(
-    `gh pr view ${pr.number} --repo ${pr.repo} --json baseRefName,mergeable`
+    `gh pr view ${pr.number} --repo ${pr.repo} --json baseRefName,mergeable`,
   );
 
   const data = JSON.parse(stdout) as {
@@ -290,11 +294,11 @@ export async function refreshPRStatus(pr: PR): Promise<PR> {
  */
 export async function updateBranchWithBase(
   repo: string,
-  prNumber: number
+  prNumber: number,
 ): Promise<UpdateResult> {
   try {
     await executeWithRetry(
-      `gh api repos/${repo}/pulls/${prNumber}/update-branch --method PUT`
+      `gh api repos/${repo}/pulls/${prNumber}/update-branch --method PUT`,
     );
     return { success: true, conflict: false };
   } catch (error) {
@@ -319,7 +323,7 @@ export async function updateBranchWithBase(
  */
 export async function rerunFailedJobs(
   repo: string,
-  runId: number
+  runId: number,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     await executeWithRetry(`gh run rerun ${runId} --repo ${repo} --failed`);

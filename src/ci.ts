@@ -25,32 +25,42 @@ export async function getCIStatus(pr: PR): Promise<CIStatus> {
   }
 
   // Get the latest commit SHA to filter runs
-  const latestSha = await getLatestCommitSha(pr.repo, pr.number);
+  const latestSha = await getLatestCommitSha(pr.repo, pr.headRef);
 
   // Only consider runs for the latest commit, excluding ignored workflows
   const latestRuns = runs.filter(
-    (r) => r.headSha === latestSha && !IGNORED_WORKFLOWS.includes(r.name)
+    (r) => r.headSha === latestSha && !IGNORED_WORKFLOWS.includes(r.name),
   );
 
-  if (latestRuns.length === 0) {
+  // Deduplicate by workflow name - keep only the latest run per workflow
+  // (gh run list returns newest first, so first seen = most recent)
+  const deduped = new Map<string, WorkflowRun>();
+  for (const run of latestRuns) {
+    if (!deduped.has(run.name)) {
+      deduped.set(run.name, run);
+    }
+  }
+  const uniqueRuns = [...deduped.values()];
+
+  if (uniqueRuns.length === 0) {
     // No runs for the latest commit yet - CI might still be starting
     return { type: "pending", runs: [] };
   }
 
   // Check if any are still in progress
-  const inProgress = latestRuns.filter(
-    (r) => r.status === "queued" || r.status === "in_progress"
+  const inProgress = uniqueRuns.filter(
+    (r) => r.status === "queued" || r.status === "in_progress",
   );
   if (inProgress.length > 0) {
     return { type: "pending", runs: inProgress };
   }
 
   // Check for failures
-  const failed = latestRuns.filter(
+  const failed = uniqueRuns.filter(
     (r) =>
       r.conclusion === "failure" ||
       r.conclusion === "timed_out" ||
-      r.conclusion === "cancelled"
+      r.conclusion === "cancelled",
   );
   if (failed.length > 0) {
     return { type: "failing", runs: failed };
@@ -66,7 +76,7 @@ export async function getCIStatus(pr: PR): Promise<CIStatus> {
 export async function waitForCI(
   pr: PR,
   config: Config,
-  onStatusUpdate?: (status: CIStatus) => void
+  onStatusUpdate?: (status: CIStatus) => void,
 ): Promise<CIStatus> {
   const startTime = Date.now();
 
@@ -98,7 +108,7 @@ export async function waitForCI(
  */
 export async function retryFailedCI(
   pr: PR,
-  failedRuns: WorkflowRun[]
+  failedRuns: WorkflowRun[],
 ): Promise<{ success: boolean; errors: string[] }> {
   const errors: string[] = [];
 
@@ -122,7 +132,7 @@ export async function retryAndWaitForCI(
   pr: PR,
   failedRuns: WorkflowRun[],
   config: Config,
-  onStatusUpdate?: (status: CIStatus) => void
+  onStatusUpdate?: (status: CIStatus) => void,
 ): Promise<CIStatus> {
   // Trigger re-runs
   const retryResult = await retryFailedCI(pr, failedRuns);
@@ -130,7 +140,7 @@ export async function retryAndWaitForCI(
   if (!retryResult.success) {
     // Some re-runs failed to trigger, but continue waiting
     console.warn(
-      `Warning: Some CI re-runs failed to trigger: ${retryResult.errors.join(", ")}`
+      `Warning: Some CI re-runs failed to trigger: ${retryResult.errors.join(", ")}`,
     );
   }
 
